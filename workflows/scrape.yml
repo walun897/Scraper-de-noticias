@@ -1,0 +1,38 @@
+name: scrape-news
+on:
+  schedule:
+    - cron: "10 11 * * *"  # 06:10 America/Bogota (UTC-5) = 11:10 UTC
+  workflow_dispatch: {}     # permite ejecutarlo manualmente
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # para commitear CSVs al repo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements.txt
+
+      - name: Run scraper
+        run: |
+          python scripts/scrape_news.py --outdir data --target-per-class 150 --max-per-factcheck 180 --max-per-trusted 70 --pages 3
+
+      - name: Consolidate history
+        run: |
+          python scripts/consolidate.py data data/dataset_historico.csv
+
+      - name: Commit results
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: daily scrape + consolidate"
+          file_pattern: data/*.csv
