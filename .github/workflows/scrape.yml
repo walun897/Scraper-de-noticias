@@ -1,14 +1,14 @@
 name: scrape-news
 on:
   schedule:
-    - cron: "0 23 * * *"  # 18:00 Bogotá (UTC-5) = 23:00 UTC
-  workflow_dispatch: {}     # permite ejecutarlo manualmente
+    - cron: "10 11 * * *"  # 06:10 Bogotá (UTC-5) = 11:10 UTC
+  workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # para poder commitear CSVs
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,21 +18,47 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install deps
         run: |
           python -m pip install -U pip
           pip install -r requirements.txt
 
       - name: Run scraper
         run: |
-          python scripts/scrape_news.py --outdir data --target-per-class 150 --max-per-factcheck 180 --max-per-trusted 70 --pages 3
+          python scripts/scrape_news.py --outdir data --target-per-class 150 --max-per-factcheck 200 --max-per-trusted 70 --pages 3
 
       - name: Consolidate history
         run: |
           python scripts/consolidate.py data data/dataset_historico.csv
 
+      - name: Validate & report
+        run: |
+          python scripts/validate.py data data/reportes
+
+      - name: Upload artifacts (jsonl/parquet/reportes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: datasets-${{ github.run_id }}
+          path: |
+            data/jsonl/*.jsonl
+            data/parquet/*.parquet
+            data/reportes/*.md
+
       - name: Commit results
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: daily scrape + consolidate"
-          file_pattern: data/*.csv
+          commit_message: "chore: daily scrape + consolidate + report"
+          file_pattern: |
+            data/*.csv
+            data/jsonl/*.jsonl
+            data/parquet/*.parquet
+            data/reportes/*.md
+            data/html/**
