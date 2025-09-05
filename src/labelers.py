@@ -1,4 +1,3 @@
-# src/labelers.py
 from __future__ import annotations
 from typing import Optional
 
@@ -11,7 +10,7 @@ def _pick(txt: str, pos, neg, dub) -> Optional[str]:
     if any(w in r for w in dub): return DOUBT
     return None
 
-def norm_from_colombiacheck(x): return _pick(x, ["verdadero"], ["falso","engañoso"], ["inchequeable","dudoso"])
+def norm_from_colombiacheck(x): return _pick(x, ["verdadero","verdadera"], ["falso","engañoso","cuestionable"], ["inchequeable","dudoso"])
 def norm_from_afp(x):           return _pick(x, ["cierto","verdadero"], ["falso","engañoso"], ["dudoso","no verificable"])
 def norm_from_maldita(x):       return _pick(x, ["es cierto","verdadero"], ["bulo","falso"], ["sin evidencias","dudoso"])
 def norm_from_newtral(x):       return _pick(x, ["verdadero","verdadera"], ["falso","bulo","engañoso"], ["no verificable","dudoso"])
@@ -23,6 +22,11 @@ def norm_from_verificadomx(x):  return _pick(x, ["verdadero"], ["falso","bulo"],
 def norm_from_bolivia(x):       return _pick(x, ["verdadero"], ["falso"], ["dudoso"])
 def norm_from_ecuador(x):       return _pick(x, ["verdadero"], ["falso"], ["dudoso"])
 def norm_from_factchequeado(x): return _pick(x, ["verdadero"], ["falso"], ["dudoso"])
+def norm_from_ojobionico(x):    return _pick(x, ["verdadero","cierto"], ["falso","bulo","engañoso"], ["dudoso"])
+def norm_from_fastcheck(x):     return _pick(x, ["verdadero"], ["falso"], ["dudoso"])
+def norm_from_espaja(x):        return _pick(x, ["verdadero"], ["falso"], ["dudoso"])
+def norm_from_cotejo(x):        return _pick(x, ["verdadero"], ["falso"], ["dudoso"])
+def norm_from_uycheck(x):       return _pick(x, ["verdadero"], ["falso"], ["dudoso"])
 
 LABELERS = {
     "colombiacheck": norm_from_colombiacheck,
@@ -37,5 +41,9 @@ LABELERS = {
     "bolivia": norm_from_bolivia,
     "ecuador": norm_from_ecuador,
     "factchequeado": norm_from_factchequeado,
+    "ojobionico": norm_from_ojobionico,
+    "fastcheck": norm_from_fastcheck,
+    "espaja": norm_from_espaja,
+    "cotejo": norm_from_cotejo,
+    "uycheck": norm_from_uycheck,
 }
-
