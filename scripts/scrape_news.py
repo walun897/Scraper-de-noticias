@@ -556,8 +556,8 @@ def balanced_sample_by_ratio(df_in, ratios, target_total, seed=42):
         out = df_in.copy()
     return out
 
-# tamaño objetivo y ratios (ej. 40/40/20)
-df_bal = balanced_sample_by_ratio(df, ratios, target_total)
+    # tamaño objetivo y ratios (ej. 40/40/20)
+    df_bal = balanced_sample_by_ratio(df, ratios, target_total)
 # -------------------------------------------------------------------------------
     # --- Guardados ---
     # CSV (coma, UTF-8)
