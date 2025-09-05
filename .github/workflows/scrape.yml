@@ -1,7 +1,7 @@
 name: scrape-news
 on:
   schedule:
-    - cron: "0 23 * * *"  # 06:10 Bogotá (UTC-5) = 11:10 UTC
+    - cron: "0 23 * * *"  # 18:00 Bogotá (UTC-5) = 23:00 UTC
   workflow_dispatch: {}
 
 jobs:
