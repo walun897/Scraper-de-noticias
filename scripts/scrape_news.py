@@ -204,7 +204,6 @@ TRUSTED_SOURCES = [
     {"source":"Portafolio","rss":"https://www.portafolio.co/rss.xml"},
     {"source":"Infobae","listing_url":"https://www.infobae.com/colombia/","link_selectors":["a[href^='https://www.infobae.com/colombia/']"]},
 ]
-]
 FACTCHECK_SOURCES = [
     {"source":"Colombiacheck","listing_urls":["https://colombiacheck.com/chequeos","https://colombiacheck.com/"],
      "link_selectors":["a[href*='/chequeo/']","a[href*='/chequeos/']"],"restrict":["/chequeo/","/chequeos/"],"use_requests":True},
@@ -227,8 +226,6 @@ FACTCHECK_SOURCES = [
      "restrict":["/chequeo/","/falso/","/verdadero/"]},
     {"source":"AgenciaOcote","listing_urls":["https://www.agenciaocote.com/"],
      "link_selectors":["a[href*='/verificacion/']"],"restrict":["/verificacion/"]},
-]
-
 ]
 
 # ====== listados ======
