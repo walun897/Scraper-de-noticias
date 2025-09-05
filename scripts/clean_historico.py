@@ -47,4 +47,3 @@ if __name__=="__main__":
     inp = sys.argv[1] if len(sys.argv)>1 else "data/dataset_historico.csv"
     out = sys.argv[2] if len(sys.argv)>2 else "data/dataset_historico_clean.csv"
     main(inp, out)
-
