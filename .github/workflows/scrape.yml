@@ -21,17 +21,24 @@ jobs:
         run: |
           python - <<'PY'
           import sys
-          sys.path.append('src')
-          from pipeline import run_all, save_daily_and_master
-          from balance import stratified_balance
-          from utils import logger
-
+          # Asegura que el repo raíz está en sys.path:
+          sys.path.append('.')
+          # Importa desde el paquete 'src' (requiere src/__init__.py):
+          from src.pipeline import run_all, save_daily_and_master
+          from src.balance import stratified_balance
+          from src.utils import logger
+          
           df_fc, df_nw = run_all()
-          if not df_fc.empty:
-              df_fc = stratified_balance(df_fc)
+          if len(df_fc) > 0:
+            df_fc = stratified_balance(df_fc)
           save_daily_and_master(df_fc, df_nw)
           logger.info(f"factcheck={len(df_fc)} news={len(df_nw)}")
           PY
+          
+
+
+
+    
       - name: Commit outputs
         run: |
           git config user.name "github-actions"
