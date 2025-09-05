@@ -13,11 +13,9 @@ def main(indir="data", out="data/dataset_historico.csv"):
             print(f"[WARN] {f}: {e}")
     df = pd.concat(dfs, ignore_index=True)
 
-    # señales de calidad
     df["_fecha_ok"] = df["fecha"].fillna("").str.len()>0
     df["_len_texto"] = df["texto"].fillna("").str.len()
 
-    # clave dedup: url_hash > url_canonica > url
     if "url_hash" in df.columns and df["url_hash"].notna().any():
         key = "url_hash"
     elif "url_canonica" in df.columns and df["url_canonica"].notna().any():
@@ -25,7 +23,6 @@ def main(indir="data", out="data/dataset_historico.csv"):
     else:
         key = "url"
 
-    # ordena para conservar la mejor fila
     df = df.sort_values(by=["_fecha_ok","_len_texto","fecha"], ascending=[False, False, False]) \
            .drop_duplicates(subset=[key], keep="first") \
            .drop(columns=["_fecha_ok","_len_texto"], errors="ignore")
