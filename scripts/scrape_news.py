@@ -595,13 +595,25 @@ if __name__=="__main__":
     ap.add_argument("--max-per-factcheck", type=int, default=120)
     ap.add_argument("--max-per-trusted", type=int, default=60)
     ap.add_argument("--pages", type=int, default=3)
-    args = ap.parse_args()
+    # 👇 NUEVOS ARGUMENTOS
     ap.add_argument("--target-total", type=int, default=360,
-                help="Tamaño objetivo del muestreo balanceado final")
-    ap.add_argument("--ratio", type=str, default="falso=0.4,verdadero=0.4,dudoso=0.2",
-                help="Proporciones por clase, ej: 'falso=0.4,verdadero=0.4,dudoso=0.2'")
+                    help="Número total de filas a muestrear balanceado")
+    ap.add_argument("--ratio", type=str,
+                    default="falso=0.4,verdadero=0.4,dudoso=0.2",
+                    help="Proporción por clase, ej: 'falso=0.4,verdadero=0.4,dudoso=0.2'")
 
+    args = ap.parse_args()
+
+    # convierte el ratio en dict
+    ratios = dict(item.split("=") for item in args.ratio.split(","))
+    ratios = {k.strip(): float(v) for k,v in ratios.items()}
 
     asyncio.get_event_loop().run_until_complete(
-        run(args.outdir, args.target_per_class, args.max_per_factcheck, args.max_per_trusted, args.pages)
+        run(args.outdir,
+            args.target_per_class,
+            args.max_per_factcheck,
+            args.max_per_trusted,
+            args.pages,
+            args.target_total,
+            ratios)
     )
