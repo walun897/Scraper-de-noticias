@@ -8,6 +8,9 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 import requests, httpx, chardet, feedparser, pandas as pd, tldextract
 from dateutil import parser as dateparser
 from selectolax.parser import HTMLParser
+import unicodedata
+from ftfy import fix_text
+import re
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
 TIMEOUT, RETRIES, CONCURRENCY = 35, 2, 10
