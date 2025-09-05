@@ -408,12 +408,6 @@ async def run(outdir, target_per_class, max_fact, max_trusted, pages, target_tot
     ratios = dict(item.split("=") for item in ap.parse_args().ratio.split(","))
     ratios = {k.strip(): float(v) for k, v in ratios.items()}
 
-    asyncio.get_event_loop().run_until_complete(
-        run(args.outdir, args.target_per_class, args.max_per_factcheck,
-        args.max_per_trusted, args.pages, args.target_total, ratios)
-    )
-
-
     # recolectar jobs
     jobs=[]
     # confiables
@@ -588,14 +582,14 @@ def balanced_sample_by_ratio(df_in, ratios, target_total, seed=42):
     print("-", jsonl_path)
     print("-", parquet_path)
 
-if __name__=="__main__":
+if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default="data", help="Carpeta de salida")
     ap.add_argument("--target-per-class", type=int, default=120)
     ap.add_argument("--max-per-factcheck", type=int, default=120)
     ap.add_argument("--max-per-trusted", type=int, default=60)
     ap.add_argument("--pages", type=int, default=3)
-    # 👇 NUEVOS ARGUMENTOS
+    # balanceo 40/40/20 (configurable)
     ap.add_argument("--target-total", type=int, default=360,
                     help="Número total de filas a muestrear balanceado")
     ap.add_argument("--ratio", type=str,
@@ -603,17 +597,35 @@ if __name__=="__main__":
                     help="Proporción por clase, ej: 'falso=0.4,verdadero=0.4,dudoso=0.2'")
 
     args = ap.parse_args()
-
-    # convierte el ratio en dict
     ratios = dict(item.split("=") for item in args.ratio.split(","))
-    ratios = {k.strip(): float(v) for k,v in ratios.items()}
+    ratios = {k.strip(): float(v) for k, v in ratios.items()}
 
-    asyncio.get_event_loop().run_until_complete(
-        run(args.outdir,
-            args.target_per_class,
-            args.max_per_factcheck,
-            args.max_per_trusted,
-            args.pages,
-            args.target_total,
-            ratios)
-    )
+    coro = run(args.outdir,
+               args.target_per_class,
+               args.max_per_factcheck,
+               args.max_per_trusted,
+               args.pages,
+               args.target_total,
+               ratios)
+
+    # ------ Lanzador asyncio robusto ------
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    if loop.is_running():
+        # Si ya hay loop corriendo (p. ej. entornos que lo activan), usa uno nuevo temporal
+        new_loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(new_loop)
+            new_loop.run_until_complete(coro)
+        finally:
+            new_loop.close()
+            asyncio.set_event_loop(loop)
+    else:
+        loop.run_until_complete(coro)
