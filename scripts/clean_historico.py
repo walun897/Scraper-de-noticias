@@ -20,7 +20,10 @@ def sanitize_text(s):
     return s
 
 def main(inp="data/dataset_historico.csv", out="data/dataset_historico_clean.csv"):
-    df = pd.read_csv(inp)
+    import os
+    if not os.path.exists(inp):
+        print(f"[SKIP] No existe {inp}. Aún no hay histórico que limpiar.")
+        return 0
     # sanitiza
     for col in ["titulo","texto","fuente","estado","url","url_canonica"]:
         if col in df.columns:
