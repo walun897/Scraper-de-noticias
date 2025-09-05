@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import argparse, asyncio, re, html, json, os, random
-from datetime import timezone
+import argparse, asyncio, re, html, json, os, hashlib, glob
+from datetime import timezone, datetime, date
 from typing import List, Dict, Any, Optional, Tuple
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
 import requests, httpx, chardet, feedparser, pandas as pd, tldextract
 from dateutil import parser as dateparser
@@ -11,6 +12,7 @@ from selectolax.parser import HTMLParser
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
 TIMEOUT, RETRIES, CONCURRENCY = 35, 2, 10
 
+# ====== util ======
 def norm_ws(s:str)->str:
     if not s: return ""
     s = html.unescape(s)
@@ -37,6 +39,22 @@ def decode_guess(raw: bytes) -> str:
     enc = (chardet.detect(raw).get("encoding") or "utf-8").strip()
     try: return raw.decode(enc, errors="replace")
     except Exception: return raw.decode("utf-8", errors="ignore")
+
+def canonicalize_url(url: str) -> str:
+    """Quita parámetros de tracking y resuelve redirecciones."""
+    try:
+        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True)
+        final = r.url
+    except Exception:
+        final = url
+    u = urlparse(final)
+    qs = [(k,v) for k,v in parse_qsl(u.query, keep_blank_values=False)
+          if k.lower() not in {"utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"}]
+    new_qs = urlencode(qs)
+    return urlunparse((u.scheme, u.netloc, u.path, u.params, new_qs, ""))
+
+def url_sha256(u: str) -> str:
+    return hashlib.sha256(u.encode("utf-8")).hexdigest()
 
 def domain_of(url: str) -> str:
     ext = tldextract.extract(url)
@@ -65,6 +83,7 @@ def head_requests(url: str) -> Optional[requests.Response]:
     except Exception:
         return None
 
+# ====== HTTP ======
 async def fetch_httpx(client: httpx.AsyncClient, url: str) -> Optional[bytes]:
     last=None
     for _ in range(RETRIES+1):
@@ -86,6 +105,7 @@ def fetch_requests(url:str)->Optional[bytes]:
         print(f"[WARN requests] {url} -> {e}")
     return None
 
+# ====== parsing ======
 def extract_title(doc: HTMLParser)->str:
     el=doc.css_first('meta[property="og:title"]')
     if el and el.attributes.get("content"): return norm_ws(el.attributes["content"])
@@ -171,7 +191,7 @@ def detect_verdict(doc: HTMLParser)->Optional[str]:
         if re.search(pat, body, flags=re.IGNORECASE): return lab
     return None
 
-# ---------- fuentes ----------
+# ====== fuentes ======
 TRUSTED_SOURCES = [
     {"source":"ElTiempo","listing_url":"https://www.eltiempo.com/ultimas-noticias","link_selectors":["a[href^='https://www.eltiempo.com/']"]},
     {"source":"ElEspectador","listing_url":"https://www.elespectador.com/ultimas-noticias-colombia/","link_selectors":["a[href^='https://www.elespectador.com/']"]},
@@ -195,6 +215,7 @@ FACTCHECK_SOURCES = [
      "link_selectors":["a[href*='/verificacion/']","a[href*='/bulos/']"],"restrict":["/verificacion/","/bulos/"]},
 ]
 
+# ====== listados ======
 def urls_from_rss(rss_url:str, limit:int)->List[Tuple[str, Optional[str], Optional[str], Optional[str]]]:
     try:
         fp=feedparser.parse(rss_url); out=[]
@@ -231,7 +252,7 @@ def listing_pages(base_url:str, pages:int)->List[str]:
         out += [f"{base_url.rstrip('/')}/page/{p}", f"{base_url}?page={p}", f"{base_url}?p={p}"]
     return out
 
-def get_listing_html(url:str, use_requests:bool)->Optional[str]:
+def get_listing_html(url:str)->Optional[str]:
     try:
         r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
         if 200 <= r.status_code < 400:
@@ -240,27 +261,60 @@ def get_listing_html(url:str, use_requests:bool)->Optional[str]:
         print(f"[WARN listing] {url} -> {e}")
     return None
 
-async def scrape_article(client: httpx.AsyncClient, url:str, fb:Dict[str,Any], default_label:Optional[str], use_requests:bool)->Dict[str,Any]:
-    out={"fuente":fb.get("source",""),"fecha":"", "titulo":"", "texto":"", "estado": default_label or "", "url": url}
+# ====== scraping artículo ======
+async def scrape_article(client: httpx.AsyncClient, url:str, fb:Dict[str,Any], default_label:Optional[str], use_requests:bool, html_dir:str) -> Dict[str,Any]:
+    out={"fuente":fb.get("source",""),"fecha":"", "titulo":"", "texto":"", "estado": default_label or "", "url": url,
+         "url_canonica":"", "url_hash":"", "html_raw_path":"", "fecha_crawl": datetime.utcnow().isoformat()}
+
+    # descarga (parche Colombiacheck con requests)
     raw = fetch_requests(url) if use_requests else await fetch_httpx(client, url)
     if not raw: return out
+
+    # canónica + hash
+    can = canonicalize_url(url)
+    out["url_canonica"] = can
+    out["url_hash"] = url_sha256(can)
+
+    # guardar HTML crudo
+    os.makedirs(html_dir, exist_ok=True)
+    html_path = os.path.join(html_dir, f"{out['url_hash']}.html")
+    try:
+        with open(html_path, "wb") as f:
+            f.write(raw)
+        out["html_raw_path"] = html_path.replace("\\","/")
+    except Exception as e:
+        print(f"[WARN save HTML] {url} -> {e}")
+
     doc=HTMLParser(decode_guess(raw))
     out["titulo"]=to_utf8(extract_title(doc) or fb.get("title","") or "")
     out["texto"]=to_utf8(extract_text(doc))
-    date_iso = extract_date_generic(doc) or fb.get("published_at") or date_from_url(url)
+
+    date_iso = extract_date_generic(doc) or fb.get("published_at") or date_from_url(can)
     if not date_iso:
-        h=head_requests(url)
+        h=head_requests(can)
         if h:
             di = h.headers.get("Last-Modified") or h.headers.get("Date") or h.headers.get("date")
             date_iso = parse_date_any(di) if di else None
     out["fecha"]=date_iso or ""
+
     if default_label is None:
         v=detect_verdict(doc)
         if v: out["estado"]=v
     return out
 
-async def main(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, pages:int):
+# ====== main ======
+async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, pages:int):
     os.makedirs(outdir, exist_ok=True)
+    today = str(date.today())
+    html_dir = os.path.join(outdir, "html", today)
+    jsonl_path = os.path.join(outdir, "jsonl", f"dataset_{today}.jsonl")
+    parquet_path = os.path.join(outdir, "parquet", f"dataset_{today}.parquet")
+    csv_path = os.path.join(outdir, f"dataset_{today}.csv")
+    csv_excel_path = os.path.join(outdir, f"dataset_{today}_excel.csv")
+    for d in [os.path.dirname(jsonl_path), os.path.dirname(parquet_path), os.path.join(outdir, "csv"), html_dir]:
+        os.makedirs(d, exist_ok=True)
+
+    # recolectar jobs
     jobs=[]
     # confiables
     for src in TRUSTED_SOURCES:
@@ -270,14 +324,12 @@ async def main(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, 
             for (u,tt,sm,dt) in items:
                 jobs.append((u, {"source":name, "title":tt, "summary":sm, "published_at":dt}, "verdadero", False))
         else:
-            base=src["listing_url"]
-            urls=[]
-            for u in listing_pages(base, pages):
-                html_text=get_listing_html(u, use_requests=False)
+            found=[]
+            for u in listing_pages(src["listing_url"], pages):
+                html_text=get_listing_html(u)
                 if not html_text: continue
-                urls += parse_listing(html_text, u, src["link_selectors"], restrict_paths=None)
-            urls=urls[:max_trusted]
-            for u in urls:
+                found += parse_listing(html_text, u, src["link_selectors"], restrict_paths=None)
+            for u in found[:max_trusted]:
                 jobs.append((u, {"source":name}, "verdadero", False))
     # verificadores
     for src in FACTCHECK_SOURCES:
@@ -285,17 +337,18 @@ async def main(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, 
         found=[]
         for base in src["listing_urls"]:
             for u in listing_pages(base, pages):
-                html_text=get_listing_html(u, use_requests=use_req)
+                html_text=get_listing_html(u)
                 if not html_text: continue
                 found += parse_listing(html_text, u, src["link_selectors"], restrict_paths=src.get("restrict"))
-        # dedup + tope
+        # dedup por URL cruda
         seen,clean=set(),[]
         for u in found:
             if u not in seen: seen.add(u); clean.append(u)
             if len(clean)>=max_fact: break
         for u in clean:
             jobs.append((u, {"source":name}, None, use_req))
-    # dedup global
+
+    # dedup global por URL cruda
     seen,uq=set(),[]
     for u,fb,lab,use_req in jobs:
         if u not in seen: seen.add(u); uq.append((u,fb,lab,use_req))
@@ -308,18 +361,20 @@ async def main(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, 
         async def bounded(j):
             u,fb,lab,use_req=j
             async with sem:
-                return await scrape_article(client,u,fb,lab,use_req)
+                return await scrape_article(client,u,fb,lab,use_req,html_dir)
         BATCH=50
         for i in range(0,len(uq),BATCH):
             chunk=uq[i:i+BATCH]
             rows=await asyncio.gather(*[bounded(j) for j in chunk])
             results.extend(rows)
 
-    df=pd.DataFrame(results, columns=["fuente","fecha","titulo","texto","estado","url"])
+    df=pd.DataFrame(results, columns=["fuente","fecha","titulo","texto","estado","url","url_canonica","url_hash","html_raw_path","fecha_crawl"])
     df=df[df["titulo"].str.len()>0].copy()
+
     # completa 'verdadero' si viene de confiables
     trusted_names={s["source"] for s in TRUSTED_SOURCES}
     df.loc[(df["fuente"].isin(trusted_names)) & (df["estado"].isna()), "estado"]="verdadero"
+
     # normaliza
     def collapse(lbl):
         if not isinstance(lbl,str): return None
@@ -340,26 +395,44 @@ async def main(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, 
         buckets.append(sub.sample(n=take, random_state=42) if len(sub)>=take else sub)
     df_bal=pd.concat(buckets, ignore_index=True) if buckets else df.copy()
 
-    out_csv=os.path.join(outdir, f"dataset_{pd.Timestamp.utcnow().date()}.csv")
-    df_bal.to_csv(out_csv, index=False, encoding="utf-8")
-    print(f"Guardado: {out_csv}")
-    # también exporta excel-friendly
+    # --- Guardados ---
+    # CSV (coma, UTF-8)
+    df_bal.to_csv(csv_path, index=False, encoding="utf-8")
+
+    # CSV excel-friendly
     df_x=df_bal.copy()
     for c in df_x.columns:
-        df_x[c]=df_x[c].astype(str).str.replace("\r\n"," ").replace("\r"," ", regex=False).str.replace("\n"," ").str.replace("\t"," ")
-    df_x.to_csv(os.path.join(outdir, f"dataset_{pd.Timestamp.utcnow().date()}_excel.csv"), index=False, sep=";", encoding="utf-8-sig")
-    # métrica de fechas
-    pct=round((df_bal["fecha"].fillna("").str.len()>0).mean()*100,2)
-    print(f"% filas con fecha: {pct}%")
+        df_x[c]=df_x[c].astype(str).str.replace("\r\n"," ").str.replace("\r"," ").str.replace("\n"," ").str.replace("\t"," ")
+    df_x.to_csv(csv_excel_path, index=False, sep=";", encoding="utf-8-sig")
+
+    # JSONL
+    with open(jsonl_path, "a", encoding="utf-8") as f:
+        for _,row in df_bal.iterrows():
+            f.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
+
+    # Parquet
+    try:
+        df_bal.to_parquet(parquet_path, index=False)
+    except Exception as e:
+        print("[WARN parquet]", e)
+
+    pct_fecha = round((df_bal["fecha"].fillna("").str.len()>0).mean()*100,2)
+    print(f"% filas con fecha: {pct_fecha}%")
+    print("Salidas:")
+    print("-", csv_path)
+    print("-", csv_excel_path)
+    print("-", jsonl_path)
+    print("-", parquet_path)
 
 if __name__=="__main__":
-    ap=argparse.ArgumentParser()
+    ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default="data", help="Carpeta de salida")
     ap.add_argument("--target-per-class", type=int, default=120)
     ap.add_argument("--max-per-factcheck", type=int, default=120)
     ap.add_argument("--max-per-trusted", type=int, default=60)
-    ap.add_argument("--pages", type=int, default=3, help="Páginas a recorrer por listado")
-    args=ap.parse_args()
+    ap.add_argument("--pages", type=int, default=3)
+    args = ap.parse_args()
+
     asyncio.get_event_loop().run_until_complete(
-        main(args.outdir, args.target_per_class, args.max_per_factcheck, args.max_per_trusted, args.pages)
+        run(args.outdir, args.target_per_class, args.max_per_factcheck, args.max_per_trusted, args.pages)
     )
