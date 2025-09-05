@@ -44,11 +44,15 @@ jobs:
       - name: Consolidate history
         run: |
           python scripts/consolidate.py data data/dataset_historico.csv
-
+          
       - name: Clean historical (mojibake + listados)
         run: |
-          python scripts/clean_historico.py data/dataset_historico.csv data/dataset_historico_clean.csv  
-
+          if [ -f "data/dataset_historico.csv" ]; then
+            python scripts/clean_historico.py data/dataset_historico.csv data/dataset_historico_clean.csv
+          else
+            echo "[SKIP] data/dataset_historico.csv no existe todavía."
+          fi
+          
       - name: Validate & report
         run: |
           python scripts/validate.py data data/reportes
