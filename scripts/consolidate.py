@@ -12,10 +12,24 @@ def main(indir="data", out="data/dataset_historico.csv"):
         except Exception as e:
             print(f"[WARN] {f}: {e}")
     df = pd.concat(dfs, ignore_index=True)
-    # dedup por URL, conservando la fila más reciente con fecha no vacía
+
+    # señales de calidad
     df["_fecha_ok"] = df["fecha"].fillna("").str.len()>0
-    df = df.sort_values(by=["_fecha_ok","fecha"], ascending=[False, False]).drop_duplicates(subset=["url"], keep="first")
-    df = df.drop(columns=["_fecha_ok"], errors="ignore")
+    df["_len_texto"] = df["texto"].fillna("").str.len()
+
+    # clave dedup: url_hash > url_canonica > url
+    if "url_hash" in df.columns and df["url_hash"].notna().any():
+        key = "url_hash"
+    elif "url_canonica" in df.columns and df["url_canonica"].notna().any():
+        key = "url_canonica"
+    else:
+        key = "url"
+
+    # ordena para conservar la mejor fila
+    df = df.sort_values(by=["_fecha_ok","_len_texto","fecha"], ascending=[False, False, False]) \
+           .drop_duplicates(subset=[key], keep="first") \
+           .drop(columns=["_fecha_ok","_len_texto"], errors="ignore")
+
     df.to_csv(out, index=False, encoding="utf-8")
     print("Consolidado:", out, "| filas:", len(df))
 
