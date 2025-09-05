@@ -5,6 +5,7 @@ on:
   workflow_dispatch: {}
 permissions:
   contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -17,28 +18,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Prepare folders
+        run: mkdir -p data/daily data/master
       - name: Run pipeline
-        run: |
-          python - <<'PY'
-          import sys
-          # Asegura que el repo raíz está en sys.path:
-          sys.path.append('.')
-          # Importa desde el paquete 'src' (requiere src/__init__.py):
-          from src.pipeline import run_all, save_daily_and_master
-          from src.balance import stratified_balance
-          from src.utils import logger
-          
-          df_fc, df_nw = run_all()
-          if len(df_fc) > 0:
-            df_fc = stratified_balance(df_fc)
-          save_daily_and_master(df_fc, df_nw)
-          logger.info(f"factcheck={len(df_fc)} news={len(df_nw)}")
-          PY
-          
-
-
-
-    
+        run: python -m src.pipeline
       - name: Commit outputs
         run: |
           git config user.name "github-actions"
