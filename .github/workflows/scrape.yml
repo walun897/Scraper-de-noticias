@@ -1,7 +1,7 @@
 name: scrape-news
 on:
   schedule:
-    - cron: "0 23 * * *"  # 18:00 Bogotá (UTC-5) = 23:00 UTC
+    - cron: "10 11 * * *"  # 06:10 Bogotá = 11:10 UTC
   workflow_dispatch: {}
 
 jobs:
@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,31 +31,45 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -r requirements.txt
-          
+
       - name: Run scraper
+        env: { PYTHONUNBUFFERED: "1" }
         run: |
+          set -euo pipefail
+          echo "== Running scraper =="
           python scripts/scrape_news.py \
-          --outdir data \
-          --pages 3 \
-          --max-per-factcheck 200 \
-          --max-per-trusted 70 \
-          --target-total 360 \
-          --ratio "falso=0.4,verdadero=0.4,dudoso=0.2"
-            
+            --outdir data \
+            --pages 2 \
+            --max-per-factcheck 150 \
+            --max-per-trusted 60 \
+            --target-total 300 \
+            --ratio "falso=0.4,verdadero=0.4,dudoso=0.2"
+
+      - name: Show data tree (after scraper)
+        run: |
+          echo "== ls -R data =="
+          mkdir -p data
+          ls -lah data || true
+          echo "== find data =="
+          find data -maxdepth 3 -type f -printf '%p\t%k KB\n' | sort || true
+
       - name: Consolidate history
         run: |
+          set -euo pipefail
           python scripts/consolidate.py data data/dataset_historico.csv
-          
+
       - name: Clean historical (mojibake + listados)
         run: |
+          set -euo pipefail
           if [ -f "data/dataset_historico.csv" ]; then
             python scripts/clean_historico.py data/dataset_historico.csv data/dataset_historico_clean.csv
           else
             echo "[SKIP] data/dataset_historico.csv no existe todavía."
           fi
-          
+
       - name: Validate & report
         run: |
+          set -euo pipefail
           python scripts/validate.py data data/reportes
 
       - name: Upload artifacts (jsonl/parquet/reportes)
@@ -66,6 +81,12 @@ jobs:
             data/parquet/*.parquet
             data/reportes/*.md
 
+      - name: Verify outputs exist (fail if missing)
+        run: |
+          set -euo pipefail
+          test -f "data/dataset_$(date -u +%F).csv"
+          echo "OK: dataset diario existe."
+
       - name: Commit results
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
@@ -75,5 +96,3 @@ jobs:
             data/jsonl/*.jsonl
             data/parquet/*.parquet
             data/reportes/*.md
-            data/html/**
-            
