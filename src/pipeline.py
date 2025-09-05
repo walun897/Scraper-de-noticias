@@ -7,6 +7,14 @@ from .labelers import LABELERS
 from .scrapers import scrape_html_cards, scrape_rss
 from .utils import logger, safe_trim
 
+from pathlib import Path
+
+DATA_DAILY_DIR = Path("data") / "daily"
+DATA_MASTER_DIR = Path("data") / "master"
+
+for p in (DATA_DAILY_DIR, DATA_MASTER_DIR):
+    p.mkdir(parents=True, exist_ok=True)
+
 DATA_DAILY_DIR = os.path.join("data","daily")
 DATA_MASTER_DIR = os.path.join("data","master")
 os.makedirs(DATA_DAILY_DIR, exist_ok=True); os.makedirs(DATA_MASTER_DIR, exist_ok=True)
