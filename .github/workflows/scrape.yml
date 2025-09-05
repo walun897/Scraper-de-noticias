@@ -30,11 +30,17 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -r requirements.txt
-
+          
       - name: Run scraper
         run: |
-          python scripts/scrape_news.py --outdir data --target-per-class 150 --max-per-factcheck 200 --max-per-trusted 70 --pages 3
-
+          python scripts/scrape_news.py \
+          --outdir data \
+          --pages 3 \
+          --max-per-factcheck 200 \
+          --max-per-trusted 70 \
+          --target-total 360 \
+          --ratio "falso=0.4,verdadero=0.4,dudoso=0.2"
+            
       - name: Consolidate history
         run: |
           python scripts/consolidate.py data data/dataset_historico.csv
