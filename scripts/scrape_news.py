@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import argparse, asyncio, re, html, json, os, hashlib, glob, unicodedata
+import argparse, asyncio, re, html, json, os, hashlib, unicodedata
 from datetime import timezone, datetime, date
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
@@ -27,7 +27,7 @@ def to_utf8(s):
     return s.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
 
 def sanitize_text(s: Optional[str]) -> str:
-    """Corrige mojibake (Ã¡, Ã±, √±), normaliza NFC y limpia control chars."""
+    """Corrige mojibake, normaliza Unicode y limpia caracteres de control."""
     if s is None: return ""
     if isinstance(s, bytes):
         try: s = s.decode("utf-8", errors="ignore")
@@ -407,7 +407,10 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
             results.extend(rows)
 
     df=pd.DataFrame(results, columns=["fuente","fecha","titulo","texto","estado","url","url_canonica","url_hash","html_raw_path","fecha_crawl"])
-    df=df[df["titulo"].str.len()>0].copy()
+
+    # filtros de calidad mínimos
+    df = df[df["titulo"].fillna("").str.len() >= 12].copy()
+    df = df[df["texto"].fillna("").str.len() >= 200].copy()
 
     # completa 'verdadero' si viene de confiables
     trusted_names={s["source"] for s in TRUSTED_SOURCES}
@@ -427,7 +430,7 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
     df = df.sort_values(by=["fecha"], ascending=[False]).drop_duplicates(subset=[key], keep="first").copy()
 
     print("==== STATS ====")
-    print("Noticias recolectadas antes de balance:", len(df))
+    print("Filas post-filtros/pre-balance:", len(df))
     if not df.empty:
         print(df["estado"].value_counts(dropna=False))
     else:
@@ -438,11 +441,9 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
         ratios = {k: float(v) for k, v in ratios.items()}
         s = sum(ratios.values()) or 1.0
         ratios = {k: v/s for k, v in ratios.items()}
-
         avail = df_in["estado"].value_counts().to_dict()
         classes = list(ratios.keys())
         desired = {c: int(round(target_total * ratios.get(c, 0.0))) for c in classes}
-
         diff = target_total - sum(desired.values())
         if diff != 0:
             order = sorted(classes, key=lambda c: (target_total * ratios.get(c, 0.0)) - desired[c], reverse=(diff>0))
@@ -451,7 +452,6 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
                 if diff>0: desired[order[i]] += 1; diff -= 1
                 elif desired[order[i]]>0: desired[order[i]] -= 1; diff += 1
                 i = (i+1) % len(order)
-
         take = {c: min(desired.get(c, 0), avail.get(c, 0)) for c in classes}
         deficit = target_total - sum(take.values())
         if deficit > 0:
@@ -463,7 +463,6 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
                 if rem[c] > 0:
                     take[c] += 1; rem[c] -= 1; deficit -= 1
                 j += 1
-
         parts=[]
         for c,n in take.items():
             if n<=0: continue
@@ -475,6 +474,9 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
     # ------------------------------------------------------
 
     # ---- Guardados (siempre guardamos, aunque esté vacío) ----
+    os.makedirs(os.path.join(outdir, "jsonl"), exist_ok=True)
+    os.makedirs(os.path.join(outdir, "parquet"), exist_ok=True)
+
     df_bal.to_csv(csv_path, index=False, encoding="utf-8")
 
     df_x = df_bal.copy()
@@ -506,11 +508,8 @@ if __name__ == "__main__":
     ap.add_argument("--max-per-factcheck", type=int, default=120)
     ap.add_argument("--max-per-trusted", type=int, default=60)
     ap.add_argument("--pages", type=int, default=3)
-    ap.add_argument("--target-total", type=int, default=360,
-                    help="Número total balanceado")
-    ap.add_argument("--ratio", type=str,
-                    default="falso=0.4,verdadero=0.4,dudoso=0.2",
-                    help="Proporción por clase, ej: 'falso=0.4,verdadero=0.4,dudoso=0.2'")
+    ap.add_argument("--target-total", type=int, default=360, help="Número total balanceado")
+    ap.add_argument("--ratio", type=str, default="falso=0.4,verdadero=0.4,dudoso=0.2", help="Proporción por clase")
 
     args = ap.parse_args()
     ratios = {k.strip(): float(v) for k,v in (item.split("=") for item in args.ratio.split(","))}
