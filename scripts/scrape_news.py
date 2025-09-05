@@ -395,7 +395,7 @@ async def scrape_article(client: httpx.AsyncClient, url:str, fb:Dict[str,Any], d
     return out
 
 # ====== main ======
-async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, pages:int):
+async def run(outdir, target_per_class, max_fact, max_trusted, pages, target_total, ratios):
     os.makedirs(outdir, exist_ok=True)
     today = str(date.today())
     html_dir = os.path.join(outdir, "html", today)
@@ -405,6 +405,14 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
     csv_excel_path = os.path.join(outdir, f"dataset_{today}_excel.csv")
     for d in [os.path.dirname(jsonl_path), os.path.dirname(parquet_path), os.path.join(outdir, "csv"), html_dir]:
         os.makedirs(d, exist_ok=True)
+    ratios = dict(item.split("=") for item in ap.parse_args().ratio.split(","))
+    ratios = {k.strip(): float(v) for k, v in ratios.items()}
+
+    asyncio.get_event_loop().run_until_complete(
+        run(args.outdir, args.target_per_class, args.max_per_factcheck,
+        args.max_per_trusted, args.pages, args.target_total, ratios)
+    )
+
 
     # recolectar jobs
     jobs=[]
@@ -484,17 +492,73 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
         return "dudoso"
     df["estado"]=df["estado"].map(collapse)
 
-    # balance estratificado (prioriza falso/dudoso)
-    buckets=[]
-    for cls in ["falso","dudoso","verdadero"]:
-        sub=df[df["estado"]==cls]
-        if len(sub)==0: 
-            print(f"[Aviso] sin filas para clase: {cls}")
-            continue
-        take=min(target_per_class, len(sub))
-        buckets.append(sub.sample(n=take, random_state=42) if len(sub)>=take else sub)
-    df_bal=pd.concat(buckets, ignore_index=True) if buckets else df.copy()
+# ------------------ Balanceo por proporciones (p.ej., 40/40/20) ------------------
+import math
+from collections import defaultdict
 
+def balanced_sample_by_ratio(df_in, ratios, target_total, seed=42):
+    ratios = {k: float(v) for k, v in ratios.items()}
+    # normaliza ratios por si no suman exactamente 1
+    s = sum(ratios.values()) or 1.0
+    ratios = {k: v/s for k, v in ratios.items()}
+
+    # conteos disponibles por clase
+    avail = df_in["estado"].value_counts().to_dict()
+    classes = list(ratios.keys())
+
+    # primer pase: redondeo al entero más cercano
+    desired = {c: int(round(target_total * ratios.get(c, 0.0))) for c in classes}
+
+    # si faltan por el redondeo, ajusta
+    diff = target_total - sum(desired.values())
+    if diff != 0:
+        # reparte el exceso/defecto según la mayor fracción
+        order = sorted(classes, key=lambda c: (target_total * ratios.get(c, 0.0)) - desired[c], reverse=(diff>0))
+        i = 0
+        while diff != 0 and i < len(order):
+            desired[order[i]] += 1 if diff>0 else -1 if desired[order[i]]>0 else 0
+            diff += -1 if diff>0 else 1
+            i = (i+1) % len(order)
+
+    # clip por disponibilidad y calcula déficit
+    take = {c: min(desired.get(c, 0), avail.get(c, 0)) for c in classes}
+    deficit = target_total - sum(take.values())
+
+    # si hay déficit, redistribuye a clases con remanente
+    if deficit > 0:
+        # remanente = disponibles - ya tomados
+        rem = {c: max(avail.get(c, 0) - take.get(c, 0), 0) for c in classes}
+        # ordena por mayor remanente
+        pool = sorted(classes, key=lambda c: rem[c], reverse=True)
+        j = 0
+        while deficit > 0 and any(rem[c] > 0 for c in pool):
+            c = pool[j % len(pool)]
+            if rem[c] > 0:
+                take[c] += 1
+                rem[c] -= 1
+                deficit -= 1
+            j += 1
+
+    # si aún queda déficit (no alcanza el total), tomamos todo lo disponible
+    # y seguimos adelante sin drama
+    parts = []
+    for c, n in take.items():
+        if n <= 0: 
+            continue
+        sub = df_in[df_in["estado"] == c]
+        if len(sub) <= n:
+            parts.append(sub)
+        else:
+            parts.append(sub.sample(n=n, random_state=seed))
+    if parts:
+        out = pd.concat(parts, ignore_index=True)
+    else:
+        out = df_in.copy()
+    return out
+
+# tamaño objetivo y ratios (ej. 40/40/20)
+df_bal = balanced_sample_by_ratio(df, ratios, target_total)
+# -------------------------------------------------------------------------------
     # --- Guardados ---
     # CSV (coma, UTF-8)
     df_bal.to_csv(csv_path, index=False, encoding="utf-8")
@@ -532,6 +596,11 @@ if __name__=="__main__":
     ap.add_argument("--max-per-trusted", type=int, default=60)
     ap.add_argument("--pages", type=int, default=3)
     args = ap.parse_args()
+    ap.add_argument("--target-total", type=int, default=360,
+                help="Tamaño objetivo del muestreo balanceado final")
+    ap.add_argument("--ratio", type=str, default="falso=0.4,verdadero=0.4,dudoso=0.2",
+                help="Proporciones por clase, ej: 'falso=0.4,verdadero=0.4,dudoso=0.2'")
+
 
     asyncio.get_event_loop().run_until_complete(
         run(args.outdir, args.target_per_class, args.max_per_factcheck, args.max_per_trusted, args.pages)
