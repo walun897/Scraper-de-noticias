@@ -33,10 +33,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run scraper
-        env: { PYTHONUNBUFFERED: "1" }
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail
-          echo "== Running scraper =="
           python scripts/scrape_news.py \
             --outdir data \
             --pages 2 \
@@ -47,10 +47,10 @@ jobs:
 
       - name: Show data tree (after scraper)
         run: |
-          echo "== ls -R data =="
           mkdir -p data
+          echo "== ls -lah data =="
           ls -lah data || true
-          echo "== find data =="
+          echo "== find data (3 niveles) =="
           find data -maxdepth 3 -type f -printf '%p\t%k KB\n' | sort || true
 
       - name: Consolidate history
