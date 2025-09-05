@@ -85,6 +85,45 @@ def head_requests(url: str) -> Optional[requests.Response]:
         return requests.head(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True)
     except Exception:
         return None
+        
+def sanitize_text(s: Optional[str]) -> str:
+    """
+    Corrige mojibake (Ã¡, Ã±, √±), normaliza NFC, quita controles invisibles
+    y colapsa espacios y saltos. Seguro para textos largos.
+    """
+    if s is None:
+        return ""
+    if isinstance(s, bytes):
+        try:
+            s = s.decode("utf-8", errors="ignore")
+        except Exception:
+            s = s.decode(errors="ignore")
+    s = html.unescape(str(s))
+    try:
+        s = fix_text(s)
+    except Exception:
+        pass
+    s = unicodedata.normalize("NFC", s)
+    s = "".join(ch for ch in s if ch == "\n" or ch == "\t" or ord(ch) >= 32)
+    s = re.sub(r"[ \t]+\n", "\n", s)
+    s = re.sub(r"[ \t]{2,}", " ", s).strip()
+    return s
+
+def looks_like_article(url: str, patterns: list[str] | None) -> bool:
+    """True si la URL parece artículo según regex por fuente."""
+    if not patterns:
+        return True
+    return any(re.search(p, url) for p in patterns)
+
+def drop_listing_base(urls: list[str], listing_bases: list[str]) -> list[str]:
+    """Quita la URL base del listado (portada) que a veces se cuela."""
+    bases = {b.rstrip("/") for b in (listing_bases or [])}
+    out = []
+    for u in urls:
+        if u.rstrip("/") in bases:
+            continue
+        out.append(u)
+    return out
 
 # ====== HTTP ======
 async def fetch_httpx(client: httpx.AsyncClient, url: str) -> Optional[bytes]:
@@ -109,11 +148,25 @@ def fetch_requests(url:str)->Optional[bytes]:
     return None
 
 # ====== parsing ======
-def extract_title(doc: HTMLParser)->str:
-    el=doc.css_first('meta[property="og:title"]')
-    if el and el.attributes.get("content"): return norm_ws(el.attributes["content"])
-    if doc.css_first("title"): return norm_ws(doc.css_first("title").text())
-    if doc.css_first("h1"): return norm_ws(doc.css_first("h1").text())
+def extract_title(doc: HTMLParser) -> str:
+    # 1) <article> h1 primero (más específico de artículo)
+    art = doc.css_first("article")
+    if art:
+        h = art.css_first("h1")
+        if h:
+            t = norm_ws(h.text())
+            if t:
+                return t
+    # 2) og:title
+    el = doc.css_first('meta[property="og:title"]')
+    if el and el.attributes.get("content"):
+        return norm_ws(el.attributes["content"])
+    # 3) <title>
+    if doc.css_first("title"):
+        return norm_ws(doc.css_first("title").text())
+    # 4) h1 global
+    if doc.css_first("h1"):
+        return norm_ws(doc.css_first("h1").text())
     return ""
 
 def extract_desc(doc: HTMLParser)->str:
@@ -208,27 +261,48 @@ TRUSTED_SOURCES = [
     {"source":"Infobae","listing_url":"https://www.infobae.com/colombia/","link_selectors":["a[href^='https://www.infobae.com/colombia/']"]},
 ]
 FACTCHECK_SOURCES = [
-    {"source":"Colombiacheck","listing_urls":["https://colombiacheck.com/chequeos","https://colombiacheck.com/"],
-     "link_selectors":["a[href*='/chequeo/']","a[href*='/chequeos/']"],"restrict":["/chequeo/","/chequeos/"],"use_requests":True},
-    {"source":"LaSillaVacia","listing_urls":["https://www.lasillavacia.com/detector/","https://www.lasillavacia.com/"],
-     "link_selectors":["a[href*='/detector/']"],"restrict":["/detector/"]},
-    {"source":"AFP_Factual","listing_urls":["https://factcheck.afp.com/es"],
-     "link_selectors":["a[href^='https://factcheck.afp.com/']"],"restrict":["/es/"]},
-    {"source":"EFE_Verifica","listing_urls":["https://efe.com/verifica/"],
-     "link_selectors":["a[href*='/verifica/']"],"restrict":["/verifica/"]},
-    {"source":"Chequeado","listing_urls":["https://chequeado.com/verificaciones/"],
-     "link_selectors":["a[href^='https://chequeado.com/']"],"restrict":["/verificacion","/verificaciones/"]},
-    {"source":"Maldita","listing_urls":["https://maldita.es/malditobulo/"],
-     "link_selectors":["a[href*='/malditobulo/']"],"restrict":["/malditobulo/"]},
-    {"source":"Newtral","listing_urls":["https://www.newtral.es/datos/"],
-     "link_selectors":["a[href*='/verificacion/']","a[href*='/bulos/']"],"restrict":["/verificacion/","/bulos/"]},
-    {"source":"AnimalPolitico_Sabueso","listing_urls":["https://www.animalpolitico.com/lo-que-no-sabias/el-sabueso/"],
-     "link_selectors":["a[href*='/el-sabueso/']"],"restrict":["/el-sabueso/"]},
-    {"source":"VerificadoMX","listing_urls":["https://verificado.mx/"],
-     "link_selectors":["a[href*='/chequeo/']", "a[href*='/falso/']", "a[href*='/verdadero/']"],
-     "restrict":["/chequeo/","/falso/","/verdadero/"]},
-    {"source":"AgenciaOcote","listing_urls":["https://www.agenciaocote.com/"],
-     "link_selectors":["a[href*='/verificacion/']"],"restrict":["/verificacion/"]},
+    {"source":"Colombiacheck",
+     "listing_urls":["https://colombiacheck.com/chequeos","https://colombiacheck.com/"],
+     "link_selectors":["a[href*='/chequeo/']","a[href*='/chequeos/']"],
+     "restrict":["/chequeo/","/chequeos/"],
+     "article_patterns":[r"/chequeo/[^/]+/?$", r"/chequeos/[^/]+/?$"],
+     "use_requests": True},
+
+    {"source":"LaSillaVacia",
+     "listing_urls":["https://www.lasillavacia.com/detector/","https://www.lasillavacia.com/"],
+     "link_selectors":["a[href*='/detector/']"],
+     "restrict":["/detector/"],
+     "article_patterns":[r"/detector/[^/]+/?$"]},
+
+    {"source":"AFP_Factual",
+     "listing_urls":["https://factcheck.afp.com/es"],
+     "link_selectors":["a[href^='https://factcheck.afp.com/']"],
+     "restrict":["/es/"],
+     "article_patterns":[r"/es/[^/]+/?$"]},
+
+    {"source":"EFE_Verifica",
+     "listing_urls":["https://efe.com/verifica/"],
+     "link_selectors":["a[href*='/verifica/']"],
+     "restrict":["/verifica/"],
+     "article_patterns":[r"/verifica/[^/]+/?$"]},
+
+    {"source":"Chequeado",
+     "listing_urls":["https://chequeado.com/verificaciones/"],
+     "link_selectors":["a[href^='https://chequeado.com/']"],
+     "restrict":["/verificacion","/verificaciones/"],
+     "article_patterns":[r"/verificacion(?:es)?/[^/]+/?$"]},
+
+    {"source":"Maldita",
+     "listing_urls":["https://maldita.es/malditobulo/"],
+     "link_selectors":["a[href*='/malditobulo/']"],
+     "restrict":["/malditobulo/"],
+     "article_patterns":[r"/malditobulo/[^/]+/?$", r"/malditobulo/20\d{2}/\d{2}/\d{2}/"]},
+
+    {"source":"Newtral",
+     "listing_urls":["https://www.newtral.es/datos/"],
+     "link_selectors":["a[href*='/verificacion/']", "a[href*='/bulos/']"],
+     "restrict":["/verificacion/","/bulos/"],
+     "article_patterns":[r"/verificacion/[^/]+/?$", r"/bulos/[^/]+/?$"]},
 ]
 
 # ====== listados ======
@@ -304,6 +378,8 @@ async def scrape_article(client: httpx.AsyncClient, url:str, fb:Dict[str,Any], d
     doc=HTMLParser(decode_guess(raw))
     out["titulo"]=to_utf8(extract_title(doc) or fb.get("title","") or "")
     out["texto"]=to_utf8(extract_text(doc))
+    out["titulo"] = sanitize_text(out["titulo"])
+    out["texto"]  = sanitize_text(out["texto"])
 
     date_iso = extract_date_generic(doc) or fb.get("published_at") or date_from_url(can)
     if not date_iso:
@@ -356,6 +432,10 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
                 html_text=get_listing_html(u)
                 if not html_text: continue
                 found += parse_listing(html_text, u, src["link_selectors"], restrict_paths=src.get("restrict"))
+        found = drop_listing_base(found, src.get("listing_urls", []))
+        patterns = src.get("article_patterns")
+        found = [x for x in found if looks_like_article(x, patterns)]
+        
         # dedup por URL cruda
         seen,clean=set(),[]
         for u in found:
@@ -386,6 +466,10 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
 
     df=pd.DataFrame(results, columns=["fuente","fecha","titulo","texto","estado","url","url_canonica","url_hash","html_raw_path","fecha_crawl"])
     df=df[df["titulo"].str.len()>0].copy()
+    # dedup del día antes del balance
+    key = "url_hash" if ("url_hash" in df.columns and df["url_hash"].notna().any()) else ("url_canonica" if "url_canonica" in df.columns else "url")
+    df = df.sort_values(by=["fecha"], ascending=[False]).drop_duplicates(subset=[key], keep="first").copy()
+
 
     # completa 'verdadero' si viene de confiables
     trusted_names={s["source"] for s in TRUSTED_SOURCES}
@@ -416,9 +500,9 @@ async def run(outdir:str, target_per_class:int, max_fact:int, max_trusted:int, p
     df_bal.to_csv(csv_path, index=False, encoding="utf-8")
 
     # CSV excel-friendly
-    df_x=df_bal.copy()
+    df_x = df_bal.copy()
     for c in df_x.columns:
-        df_x[c]=df_x[c].astype(str).str.replace("\r\n"," ").str.replace("\r"," ").str.replace("\n"," ").str.replace("\t"," ")
+        df_x[c] = df_x[c].map(sanitize_text)
     df_x.to_csv(csv_excel_path, index=False, sep=";", encoding="utf-8-sig")
 
     # JSONL
