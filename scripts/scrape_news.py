@@ -197,6 +197,13 @@ TRUSTED_SOURCES = [
     {"source":"ElEspectador","listing_url":"https://www.elespectador.com/ultimas-noticias-colombia/","link_selectors":["a[href^='https://www.elespectador.com/']"]},
     {"source":"LaRepublica","rss":"https://www.larepublica.co/rss/"},
     {"source":"BloombergLinea","listing_url":"https://www.bloomberglinea.com/tags/las-ultimas/","link_selectors":["a[href^='https://www.bloomberglinea.com/']"]},
+    {"source":"Semana","listing_url":"https://www.semana.com/ultimas-noticias/","link_selectors":["a[href^='https://www.semana.com/']"]},
+    {"source":"NoticiasCaracol","listing_url":"https://noticias.caracoltv.com/ultimas-noticias","link_selectors":["a[href^='https://noticias.caracoltv.com/']"]},
+    {"source":"RCNRadio","rss":"https://www.rcnradio.com/rss.xml"},
+    {"source":"ElColombiano","listing_url":"https://www.elcolombiano.com/ultimas-noticias","link_selectors":["a[href^='https://www.elcolombiano.com/']"]},
+    {"source":"Portafolio","rss":"https://www.portafolio.co/rss.xml"},
+    {"source":"Infobae","listing_url":"https://www.infobae.com/colombia/","link_selectors":["a[href^='https://www.infobae.com/colombia/']"]},
+]
 ]
 FACTCHECK_SOURCES = [
     {"source":"Colombiacheck","listing_urls":["https://colombiacheck.com/chequeos","https://colombiacheck.com/"],
@@ -213,6 +220,15 @@ FACTCHECK_SOURCES = [
      "link_selectors":["a[href*='/malditobulo/']"],"restrict":["/malditobulo/"]},
     {"source":"Newtral","listing_urls":["https://www.newtral.es/datos/"],
      "link_selectors":["a[href*='/verificacion/']","a[href*='/bulos/']"],"restrict":["/verificacion/","/bulos/"]},
+    {"source":"AnimalPolitico_Sabueso","listing_urls":["https://www.animalpolitico.com/lo-que-no-sabias/el-sabueso/"],
+     "link_selectors":["a[href*='/el-sabueso/']"],"restrict":["/el-sabueso/"]},
+    {"source":"VerificadoMX","listing_urls":["https://verificado.mx/"],
+     "link_selectors":["a[href*='/chequeo/']", "a[href*='/falso/']", "a[href*='/verdadero/']"],
+     "restrict":["/chequeo/","/falso/","/verdadero/"]},
+    {"source":"AgenciaOcote","listing_urls":["https://www.agenciaocote.com/"],
+     "link_selectors":["a[href*='/verificacion/']"],"restrict":["/verificacion/"]},
+]
+
 ]
 
 # ====== listados ======
