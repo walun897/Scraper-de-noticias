@@ -6,10 +6,8 @@ from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode, urljoin
 import pytz
 from .config import RE_MULTISPACE
 
-# Zona horaria
 TZ = pytz.timezone("America/Bogota")
 
-# Logging
 logger = logging.getLogger("scraper")
 _handler = logging.StreamHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
@@ -17,50 +15,36 @@ if not logger.handlers:
     logger.addHandler(_handler)
 logger.setLevel(logging.INFO)
 
-def detect_decode(content_bytes: bytes) -> str:
-    """Detecta encoding y devuelve str normalizado (UTF-8) evitando mojibake."""
-    if not content_bytes:
-        return ""
-    result = from_bytes(content_bytes).best()
-    if result is None:
-        return ""
-    text = str(result)
-    text = unicodedata.normalize("NFC", text)
-    text = "".join(ch for ch in text if ch.isprintable() or ch in "\n\t\r")
-    return text
+def detect_decode(b: bytes) -> str:
+    if not b: return ""
+    res = from_bytes(b).best()
+    if res is None: return ""
+    t = unicodedata.normalize("NFC", str(res))
+    return "".join(ch for ch in t if ch.isprintable() or ch in "\n\t\r")
 
-def to_iso(dt: datetime | None) -> str:
-    if dt is None:
-        return ""
-    if dt.tzinfo is None:
-        dt = TZ.localize(dt)
+def to_iso(dt: datetime|None) -> str:
+    if dt is None: return ""
+    if dt.tzinfo is None: dt = TZ.localize(dt)
     return dt.astimezone(pytz.UTC).isoformat()
 
-def safe_trim(text: str, max_len: int) -> str:
-    if not text:
-        return ""
-    text = RE_MULTISPACE.sub(" ", text.strip())
-    if len(text) > max_len:
-        text = text[: max_len - 1].rstrip() + "…"
-    return text
+def safe_trim(s: str, n: int) -> str:
+    if not s: return ""
+    s = RE_MULTISPACE.sub(" ", s.strip())
+    return (s if len(s)<=n else s[:n-1].rstrip()+"…")
 
-def is_lowinfo_title(title: str) -> bool:
-    if not title:
-        return True
-    t = title.strip().lower()
-    if len(t) < 8:
-        return True
+def is_lowinfo_title(t: str) -> bool:
+    if not t: return True
+    tt = t.strip().lower()
+    if len(tt) < 8: return True
     bad = {"última hora","en vivo","noticias","ver más","leer más","portada"}
-    return t in bad
+    return tt in bad
 
-def canonicalize_url(base_url: str, href: str) -> str:
-    """Resuelve URL relativa, ordena query params, quita fragmento."""
+def canonicalize_url(base_url: str, href: str="") -> str:
     try:
         abs_url = urljoin(base_url or "", href or "")
         p = urlparse(abs_url)
         q = urlencode(sorted(parse_qsl(p.query, keep_blank_values=True)))
-        p2 = p._replace(query=q, fragment="")
-        return urlunparse(p2)
+        return urlunparse(p._replace(query=q, fragment=""))
     except Exception:
         return href or base_url
 
@@ -72,7 +56,6 @@ def content_fingerprint(*parts: str) -> str:
     return h.hexdigest()
 
 def replicable_url(canonical_url: str, hash_hex: str) -> str:
-    """Genera una variante con parámetros controlados (reproducible)."""
     try:
         p = urlparse(canonical_url)
         qs = dict(parse_qsl(p.query, keep_blank_values=True))
